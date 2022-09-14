@@ -1,0 +1,151 @@
+---
+title: "Estimating the Causal Effect of Pandemic-Induced League Shutdowns on Hockey Prospect Development"
+subtitle: "Background Walk-Through"
+author: "Jackie Jovanovic"
+output: 
+  html_document:
+    code_folding: hide
+date: 'September 13th, 2022'
+---
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300&family=Source+Sans+Pro&display=swap" rel="stylesheet">
+<style>
+
+body{
+font-family: 'Source Sans Pro', sans-serif;
+}
+
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_packages, include=FALSE}
+# load packages
+library(tidyverse)
+library(knitr)
+```
+
+## Load the original data and explore:
+```{r load_data, include=FALSE}
+library(readr)
+sams_ohl_data_request <- read_csv("sams_ohl_data_request.csv")
+```
+
+Variables:
+```{r variables}
+names(sams_ohl_data_request)
+```
+
+```{r, message = FALSE, warning = FALSE, echo=FALSE}
+sams_ohl_data_request %>% 
+  dplyr::select(name, team_name, season, league, position, 
+                gp, g, a, pts, pm) %>%
+  head(5) %>% 
+  knitr::kable() %>% 
+  kableExtra::kable_styling("striped")
+```
+
+```{r, include=FALSE}
+# find number of seasons
+length(unique(sams_ohl_data_request$season))
+
+# find number of leagues
+length(unique(sams_ohl_data_request$league))
+
+# find number of players
+length(unique(sams_ohl_data_request$name))
+
+# drafted players
+drafted_orig <- sams_ohl_data_request %>%
+  filter(!is.na(draft_year)) 
+length(unique(drafted_orig$name))
+```
+
+* 11690 observations
+* 28 variables
+* 40 seasons (earliest is 1982-1983, latest is 2021-2022)
+* 159 leagues
+* 3311 players
+* 873 players drafted
+
+## Data filtered to the three seasons of interest (2019-2020, 2020-2021, 2021-2022):
+
+```{r, include=FALSE}
+# filter years
+recent <- sams_ohl_data_request %>% 
+  filter(season %in% c("2019-2020", "2020-2021", "2021-2022"))
+
+# find number of leagues
+length(unique(recent$league))
+
+# find number of players
+length(unique(recent$name))
+
+# drafted players
+drafted_rec <- recent %>%
+  filter(!is.na(draft_year)) 
+length(unique(drafted_rec$name))
+```
+
+```{r, message = FALSE, warning = FALSE, echo=FALSE}
+recent %>% 
+  dplyr::select(name, team_name, season, league, position, 
+                gp, g, a, pts, pm) %>%
+  head(5) %>% 
+  knitr::kable() %>% 
+  kableExtra::kable_styling("striped")
+```
+
+* 2103 observations
+* 28 variables
+* 3 seasons
+* 159 leagues
+* 733 players
+* 136 players drafted
+
+```{r}
+# players that appear in all three seasons
+inall3 <- recent %>% 
+  group_by(name) %>% 
+  summarize(count = n())
+
+# full stats for players that played in all three seasons
+## filter(gene_ID %in% accessions40$V1) ## online example ##
+inall3_full <- recent %>% 
+  filter(name %in% inall3$name)
+
+```
+
+## How many seasons does one typically play in the OHL?
+Using the entire original dataset (40 seasons)
+```{r}
+sams_ohl_data_request %>% 
+  group_by(name) %>% 
+  summarize(count = n())
+
+# filter to only the OHL
+only_ohl <- sams_ohl_data_request %>% 
+  filter(league == "OHL")
+  #unique(sams_ohl_data_request$name)
+
+# find they amount of seasons they played in the OHL (count)
+only_ohl_counts <- only_ohl %>% 
+  group_by(name) %>% 
+  summarize(count = n())
+
+# summarize, find average 
+ohl_counts_summary <- data.frame(Summary = c("Minimum:", "1st Quarter:",
+                                             "Median:", "Mean:",
+                                             "3rd Quarter:", "Maximum:"), 
+                                 Value = c(1.000, 2.000, 3.000, 3.211,
+                                           4.000, 12.000))
+ohl_counts_summary %>% 
+  kable() %>%
+  kableExtra::kable_styling("striped")
+```
+
+
