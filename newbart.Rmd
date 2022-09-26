@@ -21,6 +21,14 @@ font-family: 'Source Sans Pro', sans-serif;
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Introduction 
+
+**Project Motivation**: Investigate the impact of pandemic restrictions on hockey player development.
+
+During 2020-2021, many hockey leagues (including NHL feeder leagues) had shortened seasons or no season due to the restrictions on play caused by the COVID-19 pandemic. Some players experiencing restrictions played in other leagues or tournaments during the 2020-21 season. Others did not play any league/tournament games during the 2020-21 season. This poses the question of whether not playing games during the 2020-2021 COVID season negatively impacted player development (or caused players to get worse). 
+
+To answer this question, we will examine data from the Ontario Hockey League, which did not play any games during the 2020-21 season. Some players from this league played in other leagues or tournaments while others did not.
+
 ```{r load_packages, include=FALSE}
 # load packages
 library(tidyverse)
@@ -33,19 +41,50 @@ library(tidytreatment)
 library(tidybayes)
 ```
 
-## Load the original data and explore:
-```{r, include=FALSE}
+## Data
+
+Our dataset is comprised of players who played in the Ontario Hockey League (OHL) during both the pre-COVID (2019-2020) and post-COVID (2021-2022) seasons. The dataset also includes information regarding other leagues they have played in during their career. There is information regarding season, team, league, points, games played, position, and drafted status. Each row is a player on a certain team in a specific season.
+
+The data was was sourced from Elite Prospects and was supplied by our external advisor, Dr. Sam Ventura.
+
+### Load the original data and explore:
+```{r}
 sams_ohl_data_request <- read_csv("sams_ohl_data_request.csv")
 ```
 
-## Data filtered to the three seasons of interest (2019-2020, 2020-2021, 2021-2022):
+### Data filtered to the three seasons of interest (2019-2020, 2020-2021, 2021-2022):
 ```{r}
 # filter years
 recent <- sams_ohl_data_request %>% 
   filter(season %in% c("2019-2020", "2020-2021", "2021-2022"))
 ```
 
+Both the 'sams_ohl_data_request' and 'recent' data frames are not currently being used in this file. 
+
 ## ohl_filtered
+
+Here is the link the GitHub file with a breakdown of how ohl_filtered was created: <https://github.com/jajovanovic/CMSAC-NHL-COVID-Impact/blob/main/meeting-files/Sam-Meeting-7-idk-22/Sam-Meeting-7-idk-22.Rmd>
+
+### Variables added:
+
+- **Player Performance** : Approximated by points per game (PPG) in the post-COVID (2021-2022) season 
+  - If a player played for multiple teams during this season, PPG was averaged over both teams
+
+- **GP** : Games played (GP) in both pre-COVID season (combined if a player played for multiple teams in a season)
+
+- **Treatment** : Whether a player played at least one game during the COVID season
+
+- **Age** : The age of the player on January 1st, 2020
+
+- **Player Quality** : Approximated by player PPG in the pre-COVID season
+
+- **Drafted** : Whether a player was drafted in 2020 or earlier
+
+- **Relative PM** : Relative plus-minus (PM) is defined as a players PM relative to the average PM of their team (\(\text{Relative PM} = PM_{player} - \mu_{PM team}\))
+
+- **Ranked PM** : How a player's PM ranks among those of their teammates
+
+
 ```{r}
 ohl_filtered <- read_csv("ohl_filtered.csv")
 
@@ -84,7 +123,7 @@ variables included: games played, points, age, position, draft status
 possible variables to include: championship (note to self: would need to convert to binary)
 which pm variables should be included? : pm, pm_rank, pm_relative
 
-```{r fit-var-sel, message = FALSE, warning = FALSE}
+```{r fit-var-sel, message = FALSE, warning = FALSE, results='hide'}
 # fit variable selection model
 var_select_bart <- wbart(x.train = dplyr::select(ohl_update, gp_19_20,
                                                  pts_19_20,age_continuous, 
@@ -122,7 +161,7 @@ Regress z ~ selected covariates
 
 Uses the **pbart** function: <https://www.rdocumentation.org/packages/BART/versions/2.9/topics/pbart>
 
-```{r prop-scr-mdl, message = FALSE, warning = FALSE}
+```{r prop-scr-mdl, message = FALSE, warning = FALSE, results='hide'}
 # fit a propensity score model
 prop_bart <- pbart(x.train = dplyr::select(ohl_update, all_of(var_select)),
                   y.train = pull(ohl_update, treatment),
@@ -138,14 +177,23 @@ ohl_update$prop_score <- prop_bart$prob.train.mean
 Using the original covariates and propensity score from step 3.
 Regress y ~ z + covariates + propensity score
 
-```{r fit-trt-ef, message = FALSE, warning = FALSE}
+```{r fit-trt-ef, message = FALSE, warning = FALSE, results='hide'}
 # fit the treatment effect model
+# te_model <- wbart(x.train = dplyr::select(ohl_update, gp_19_20, pts_19_20,
+#                                   age_continuous, pm_relative_19_20,
+#                                   pm_rank_19_20, pm_19_20, is_forward,
+#                                   is_drafted, treatment, prop_score),
+#                                   # need to include treatment and prop score
+#                  y.train = pull(ohl_update, ppg_19_20),
+#                  nskip = 10000L,
+#                  ndpost = 200L,
+#                  keepevery = 100L)
 te_model <- wbart(x.train = dplyr::select(ohl_update, gp_19_20, pts_19_20,
                                   age_continuous, pm_relative_19_20,
                                   pm_rank_19_20, pm_19_20, is_forward,
                                   is_drafted, treatment, prop_score),
                                   # need to include treatment and prop score
-                 y.train = pull(ohl_update, ppg_19_20),
+                 y.train = pull(ohl_update, ppg_21_22),
                  nskip = 10000L,
                  ndpost = 200L,
                  keepevery = 100L)
@@ -221,7 +269,7 @@ Some players that have drafted = FALSE have a value in the draft_year column. It
 ### Treatment effects
 
 Posterior conditional (average) treatment effects calculated using **treatment_effects** function. There is an equation showing the equation in the "Calculate Treatment Effects" section of the tidytreatment page, I just don't know how to write equations in R.
-```{r calc-trt-ef, message = FALSE, warning = FALSE}
+```{r calc-trt-ef, message = FALSE, warning = FALSE, results='hide'}
 # calculate treatment effects
 # sample based (using data from fit) conditional treatment effects,
 # posterior draws
@@ -301,6 +349,15 @@ variable_importance %>%
   ylab("Inclusion counts") +
   theme(axis.text.x = element_text(angle = 45, hjust=1))
 ```
+
+Look into:
+```{r}
+posterior_treat_eff %>% summarise(cte_hat = mean(cte)) %>% 
+  filter(abs(cte_hat) > 0.05)
+posterior_treat_eff %>% summarise(cte_hat = mean(cte))
+
+```
+
 
 
 ## Regular Regression Tree
