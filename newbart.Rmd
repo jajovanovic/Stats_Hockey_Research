@@ -35,6 +35,7 @@ library(tidyverse)
 library(readr)
 library(knitr)
 library(patchwork)
+library(skimr)
 
 library(BART)
 library(tidytreatment)
@@ -47,9 +48,12 @@ Our dataset is comprised of players who played in the Ontario Hockey League (OHL
 
 The data was was sourced from Elite Prospects and was supplied by our external advisor, Dr. Sam Ventura.
 
+_Note: I know the this introduction will have to change depending on the dataset used in the final version._
+
 ### Load the original data and explore:
 ```{r}
 sams_ohl_data_request <- read_csv("sams_ohl_data_request.csv")
+skim(sams_ohl_data_request)
 ```
 
 ### Data filtered to the three seasons of interest (2019-2020, 2020-2021, 2021-2022):
@@ -59,7 +63,7 @@ recent <- sams_ohl_data_request %>%
   filter(season %in% c("2019-2020", "2020-2021", "2021-2022"))
 ```
 
-Both the 'sams_ohl_data_request' and 'recent' data frames are not currently being used in this file. 
+Both the 'sams_ohl_data_request' and 'recent' data frames are not currently being used in this file. They were used in analysis in other files. 
 
 ## ohl_filtered
 
@@ -107,7 +111,7 @@ ohl_update <- ohl_filtered %>%
   mutate(s_played = case_when(season == "2021-2022" ~ 1,
                               season == "2019-2020" ~ 0)) %>% 
   as.data.frame()
-
+skim(ohl_update)
 ```
 
 Following the guidelines of <https://cran.r-project.org/web/packages/tidytreatment/vignettes/use-tidytreatment-BART.html>
@@ -121,12 +125,14 @@ Uses the **wbart** function: <https://www.rdocumentation.org/packages/BART/versi
 variables included: games played, points, age, position, draft status
 
 possible variables to include: championship (note to self: would need to convert to binary)
-which pm variables should be included? : pm, pm_rank, pm_relative
+_which pm variables should be included? : pm, pm_rank, pm_relative_
+
+We are predicting points per game using games played, points, age, plus-minus, position, and draft status.
 
 ```{r fit-var-sel, message = FALSE, warning = FALSE, results='hide'}
 # fit variable selection model
 var_select_bart <- wbart(x.train = dplyr::select(ohl_update, gp_19_20,
-                                                 pts_19_20,age_continuous, 
+                                                 pts_19_20, age_continuous, 
                                                  pm_relative_19_20, pm_19_20, 
                                                  is_forward, is_drafted),
                        y.train = pull(ohl_update, ppg_19_20),
@@ -136,13 +142,13 @@ var_select_bart <- wbart(x.train = dplyr::select(ohl_update, gp_19_20,
 ```
 I used ntree = 25 and ndpost = 50 because I was trying to follow the steps in <https://bayesiancomputationbook.com/markdown/chp_07.html#fitting-bayesian-additive-regression-trees>
 And I figured the smaller size would make it less likely for R to crash.
+In the original version (from this summer), I used nskip = 2000 and ndpost = 5000. I'm not sure which is better because I do not know the what those numbers usually are.
 
-review output
-something with tree draws?
+_review output - something with tree draws?_
 
 ### Selecting subset of covariate from the VS model
 
-select most important vars from y ~ covariates model
+Select most important vars from y ~ covariates model
 
 ```{r var-sel, message = FALSE, warning = FALSE}
 # variable selection
@@ -203,6 +209,8 @@ Many of these functions produce data types that are exclusive to that specific f
 
 #### Question:
 What data should I use for this? If I used the full original data, there will be the issue of multiple columns for one player in one season (if they played with multiple teams/leagues). The way I know how to fix that would cut out a lot of the variables. To combine player rows would I have to do summarize, for things like games played and points, then add the other columns (like name and draft year) back in. One problem with this method is I won't be able to look at league or team to draw conclusions concerning those things.
+
+_Working on this now following the guidelines from last weeks discussion._
 
 ### Extract the posterior
 ```{r extratct-post, message = FALSE, warning = FALSE}
