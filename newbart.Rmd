@@ -67,7 +67,7 @@ Both the 'sams_ohl_data_request' and 'recent' data frames are not currently bein
 
 ## ohl_filtered
 
-Here is the link the GitHub file with a breakdown of how ohl_filtered was created: <https://github.com/jajovanovic/CMSAC-NHL-COVID-Impact/blob/main/meeting-files/Sam-Meeting-7-idk-22/Sam-Meeting-7-idk-22.Rmd>
+Here is the link the GitHub file with a breakdown of how ohl_filtered was created: <https://github.com/jajovanovic/CMSAC-NHL-COVID-Impact/blob/main/meeting-files/Sam-Meeting-7-idk-22/Sam-Meeting-7-idk-22.Rmd> or <https://github.com/jajovanovic/CMSAC-NHL-COVID-Impact/blob/main/CMSACamp-Final-Report.Rmd>
 
 ### Variables added:
 
@@ -134,8 +134,18 @@ We are predicting points per game using games played, points, age, plus-minus, p
 var_select_bart <- wbart(x.train = dplyr::select(ohl_update, gp_19_20,
                                                  pts_19_20, age_continuous, 
                                                  pm_relative_19_20, pm_19_20, 
-                                                 is_forward, is_drafted),
-                       y.train = pull(ohl_update, ppg_19_20),
+                                                 is_forward, is_drafted,
+                                                 ppg_19_20),
+                       y.train = pull(ohl_update, ppg_21_22),
+                       sparse = TRUE,
+                       ntree = 25,
+                       ndpost = 50)
+# without draft
+var_select_bart_nodr <- wbart(x.train = dplyr::select(ohl_update, gp_19_20,
+                                                 pts_19_20, age_continuous, 
+                                                 pm_relative_19_20, pm_19_20, 
+                                                 is_forward, ppg_19_20),
+                       y.train = pull(ohl_update, ppg_21_22),
                        sparse = TRUE,
                        ntree = 25,
                        ndpost = 50)
@@ -154,6 +164,12 @@ Select most important vars from y ~ covariates model
 # variable selection
 covar_ranking <- covariate_importance(var_select_bart)
 var_select <- covar_ranking %>% 
+  filter(avg_inclusion >= quantile(avg_inclusion, 0.5)) %>% 
+  pull(variable)
+
+# without draft
+covar_ranking_nodr <- covariate_importance(var_select_bart_nodr)
+var_select_nodr <- covar_ranking_nodr %>% 
   filter(avg_inclusion >= quantile(avg_inclusion, 0.5)) %>% 
   pull(variable)
 ```
@@ -176,6 +192,16 @@ prop_bart <- pbart(x.train = dplyr::select(ohl_update, all_of(var_select)),
 
 # store propensity score in data
 ohl_update$prop_score <- prop_bart$prob.train.mean
+
+# copy of ohl_update
+ohl_update2 <- ohl_update
+# without draft
+prop_bart_nodr <- pbart(x.train = dplyr::select(ohl_update2, 
+                                                all_of(var_select_nodr)),
+                  y.train = pull(ohl_update2, treatment),
+                  nskip = 2000,
+                  ndpost = 5000)
+ohl_update2$prop_score <- prop_bart_nodr$prob.train.mean
 ```
 
 ### Fitting the treatment effect model
@@ -196,10 +222,21 @@ Regress y ~ z + covariates + propensity score
 #                  keepevery = 100L)
 te_model <- wbart(x.train = dplyr::select(ohl_update, gp_19_20, pts_19_20,
                                   age_continuous, pm_relative_19_20,
-                                  pm_rank_19_20, pm_19_20, is_forward,
-                                  is_drafted, treatment, prop_score),
+                                  pm_19_20, is_forward,
+                                  is_drafted, ppg_19_20, treatment, prop_score),
                                   # need to include treatment and prop score
                  y.train = pull(ohl_update, ppg_21_22),
+                 nskip = 10000L,
+                 ndpost = 200L,
+                 keepevery = 100L)
+
+# without draft
+te_model_nodr <- wbart(x.train = dplyr::select(ohl_update2, gp_19_20, pts_19_20,
+                                  age_continuous, pm_relative_19_20,
+                                  pm_19_20, is_forward,
+                                  ppg_19_20, treatment, prop_score),
+                                  # need to include treatment and prop score
+                 y.train = pull(ohl_update2, ppg_21_22),
                  nskip = 10000L,
                  ndpost = 200L,
                  keepevery = 100L)
@@ -221,6 +258,13 @@ posterior_fitted
 
 # function to tidy predicted draws and add random normal noise by default
 posterior_pred <- predicted_draws(te_model, include_newdata = FALSE)
+
+# without draft
+posterior_fitted_nodr <- fitted_draws(te_model_nodr, value = "fit",
+                                 include_newdata = FALSE)
+posterior_fitted_nodr
+posterior_pred_nodr <- predicted_draws(te_model_nodr, include_newdata = FALSE)
+
 ```
 **fitted_draws** has been deprecated. It is from the tidybayes package. Here is the documentation: <https://www.rdocumentation.org/packages/tidybayes/versions/1.1.0/topics/add_fitted_draws>
 The help menu gave other functions that can be used instead of fitted_draws, but I am not sure which one to use because I don't know what to values to use. I was going to try both functions out and compare the results to what was produced from fitted_draws but then I ran into the issue with the arguments.
@@ -248,6 +292,20 @@ posterior_fitted %>%
   xlab("Treatment (played during covid)") + ylab("Posterior predicted value") +
   theme_bw() + 
   ggtitle("Effect of treatment with 'is_forward' on posterior fitted value")
+
+# without draft
+treatment_var_and_c1_nodr <- ohl_update2 %>% 
+  dplyr::select(treatment, is_forward) %>% 
+  mutate(.row = 1:n(), treatment = as.factor(treatment))
+posterior_fitted_nodr %>% 
+  left_join(treatment_var_and_c1_nodr, by = ".row") %>% 
+  ggplot() +
+  stat_halfeye(aes(x = treatment, y = fit)) +
+  facet_wrap(~is_forward, labeller = 
+               as_labeller( function(x) paste("is_forward =",x) ) ) +
+  xlab("Treatment (played during covid)") + ylab("Posterior predicted value") +
+  theme_bw() + 
+  ggtitle("Effect of treatment with 'is_forward' on posterior fitted value - without drafted")
 ```
 
 #### Age
@@ -266,6 +324,20 @@ posterior_fitted %>%
   xlab("Treatment (played during covid)") + ylab("Posterior predicted value") +
   theme_bw() + 
   ggtitle("Effect of treatment with 'age' on posterior fitted value")
+
+# without draft
+treatment_var_and_c1_nodr <- ohl_update2 %>% 
+  dplyr::select(treatment, age) %>% 
+  mutate(.row = 1:n(), treatment = as.factor(treatment))
+posterior_fitted_nodr %>% 
+  left_join(treatment_var_and_c1_nodr, by = ".row") %>% 
+  ggplot() +
+  stat_halfeye(aes(x = treatment, y = fit)) +
+  facet_wrap(~age, labeller = 
+               as_labeller( function(x) paste("age =",x) ) ) +
+  xlab("Treatment (played during covid)") + ylab("Posterior predicted value") +
+  theme_bw() + 
+  ggtitle("Effect of treatment with 'age' on posterior fitted value - without drafted")
 ```
 I have no idea what's going on with age = 17
 
@@ -287,8 +359,18 @@ posterior_treat_eff <-
                     # which is really annoying...
                     newdata = dplyr::select(ohl_update, gp_19_20, pts_19_20, 
                                      age_continuous, pm_relative_19_20, 
-                                     pm_rank_19_20, pm_19_20, is_forward, 
+                                     pm_19_20, is_forward, ppg_19_20,
                                      is_drafted, treatment, prop_score))
+
+# without draft
+posterior_treat_eff_nodr <- 
+  treatment_effects(te_model_nodr, treatment = "treatment",
+                    # the dataset here needs to match the BART data EXACTLY
+                    # which is really annoying...
+                    newdata = dplyr::select(ohl_update2, gp_19_20, pts_19_20, 
+                                     age_continuous, pm_relative_19_20, 
+                                     pm_19_20, is_forward, ppg_19_20,
+                                     treatment, prop_score))
 ```
 All draws:
 ```{r, trt_ef_all, message = FALSE, warning = FALSE, fig.align = 'center'}
@@ -297,6 +379,12 @@ posterior_treat_eff %>%
   ggplot() +
   geom_histogram(aes(x = cte), bins = 50, color = "white") +
   theme_bw() + ggtitle("Histogram of treatment effect (all draws)")
+
+# without draft
+posterior_treat_eff_nodr %>% 
+  ggplot() +
+  geom_histogram(aes(x = cte), bins = 50, color = "white") +
+  theme_bw() + ggtitle("Histogram of treatment effect (all draws) - without draft")
 ```
 This appears to be normally distributed as the bell-curve looks to be pretty symmetric. The right side may be a bit longer, but it is minimal.
 
@@ -308,7 +396,16 @@ posterior_treat_eff %>% summarise(cte_hat = mean(cte)) %>%
   geom_histogram(aes(x = cte_hat), bins = 60, colour = "white") + 
   theme_bw() + 
   ggtitle("Histogram of treatment effect (mean for each subject)")
+
+# without draft
+posterior_treat_eff_nodr %>% summarise(cte_hat = mean(cte)) %>%
+  ggplot() +
+  geom_histogram(aes(x = cte_hat), bins = 60, colour = "white") + 
+  theme_bw() + 
+  ggtitle("Histogram of treatment effect (mean for each subject) - without draft")
 ```
+Look at the x-axis values for the "without draft" graph
+
 This histogram is clearly very different from the first one. If only looking at the center chunk (ignoring the outliers for now), the plot seems fairly symmetric. There are a lot of outliers. One suggestion Sam had was looking through the data to find the outliers and figure out what was making them stick out. There are a couple issues with that. First, the dataset used for this graph is 43800 observations. Second, since the data was generated by the function there are no names associated with each observation. The only thing I could possibly use to backtrack it is the '.row' column, but the rows range from 1 to 219 so this approach is also unrealistic.
 
 Confidence intervals of the CATEs:
@@ -326,6 +423,20 @@ posterior_treat_eff %>% select(-treatment) %>% point_interval() %>%
         axis.text.y = element_blank(), 
         axis.ticks.y = element_blank(),
         legend.position = "none")
+
+# without draft
+posterior_treat_eff_nodr %>% select(-treatment) %>% point_interval() %>%
+  arrange(cte) %>% mutate(.orow = 1:n()) %>% 
+  ggplot() + 
+  geom_interval(aes(x = .orow, y= cte, ymin = .lower, ymax = .upper)) +
+  geom_point(aes(x = .orow, y = cte), shape = "circle open", alpha = 0.5) + 
+  ylab("Median posterior CATE for each subject (95% CI)") +
+  theme_bw() + coord_flip() + scale_colour_brewer() +
+  theme(axis.title.y = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        legend.position = "none") +
+  ggtitle("Without draft")
 ```
 
 ### Investigating variable importance
@@ -343,6 +454,18 @@ treatment_interactions %>%
   ggtitle("Important variables interacting with treatment ('treatment')") + 
   ylab("Inclusion counts") +
   theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+# without draft
+treatment_interactions_nodr <-
+  covariate_with_treatment_importance(te_model_nodr, treatment = "treatment")
+
+treatment_interactions_nodr %>% 
+  ggplot() + 
+  geom_bar(aes(x = variable, y = avg_inclusion), stat = "identity") +
+  theme_bw() + 
+  ggtitle("Important variables interacting with treatment ('treatment') - without draft") + 
+  ylab("Inclusion counts") +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
 ```
 
 #### Variables overall:
@@ -356,6 +479,17 @@ variable_importance %>%
   theme_bw() + ggtitle("Important variables overall") +
   ylab("Inclusion counts") +
   theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+# without draft
+variable_importance_nodr <-
+  covariate_importance(te_model_nodr)
+
+variable_importance_nodr %>% 
+  ggplot() + 
+  geom_bar(aes(x = variable, y = avg_inclusion), stat = "identity") +
+  theme_bw() + ggtitle("Important variables overall - without draft") +
+  ylab("Inclusion counts") +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
 ```
 
 Look into:
@@ -366,7 +500,12 @@ posterior_treat_eff %>% summarise(cte_hat = mean(cte))
 
 ```
 
-
+correlation matrix - make better one
+```{r}
+library(Hmisc)
+rcorr(as.matrix(select(ohl_update, gp_19_20, pts_19_20, pm_relative_19_20, pm_19_20, ppg_19_20)))
+```
+Updated correlation matrix in 'filtering.R' script
 
 ## Regular Regression Tree
 
